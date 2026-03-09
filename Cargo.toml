@@ -13,3 +13,4 @@ toml = "1.0.6"
 tokio = { version = "1", features = ["full"] }
 reqwest = "0.13.2"
 chrono = "0.4"
+teloxide = { version = "0.13", default-features = false, features = ["rustls"] }

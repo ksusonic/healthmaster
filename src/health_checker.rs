@@ -1,4 +1,5 @@
 use crate::config::Target;
+use crate::telegram::Telegram;
 use chrono::{DateTime, Utc};
 use clickhouse::Client;
 use serde::Serialize;
@@ -12,21 +13,26 @@ pub struct HealthCheckResult {
     pub url: String,
     pub status: u16,
     pub latency_ms: u32,
-    pub success: u8,
+    pub success: bool,
     pub error: String,
 }
 
 pub struct HealthChecker {
     client: reqwest::Client,
     clickhouse: Client,
+    telegram: Telegram,
 }
 
 impl HealthChecker {
-    pub fn new(clickhouse: Client) -> Result<Self, reqwest::Error> {
+    pub fn new(clickhouse: Client, telegram: Telegram) -> Result<Self, reqwest::Error> {
         let client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::limited(10))
             .build()?;
-        Ok(Self { client, clickhouse })
+        Ok(Self {
+            client,
+            clickhouse,
+            telegram,
+        })
     }
 
     pub async fn check_target(&self, target: &Target) -> HealthCheckResult {
@@ -39,12 +45,12 @@ impl HealthChecker {
         match request.send().await {
             Ok(response) => {
                 let status = response.status().as_u16();
-                let mut success = if response.status().is_success() { 1 } else { 0 };
+                let mut success = response.status().is_success();
                 let mut error = String::new();
 
                 // Drain the body so hyper can return this connection to the pool.
                 if let Err(e) = response.bytes().await {
-                    success = 0;
+                    success = false;
                     error = format!("read response body: {e}");
                 }
 
@@ -69,7 +75,7 @@ impl HealthChecker {
                     url: target.url.clone(),
                     status: 0,
                     latency_ms,
-                    success: 0,
+                    success: false,
                     error: e.to_string(),
                 }
             }
@@ -107,7 +113,7 @@ impl HealthChecker {
         loop {
             let result = self.check_target(&target).await;
 
-            let success_str = if result.success == 1 { "✓" } else { "✗" };
+            let success_str = if result.success { "ok" } else { "err" };
             println!(
                 "{} {} - {} ({}ms) - status: {}",
                 success_str,
@@ -120,6 +126,12 @@ impl HealthChecker {
                     result.error.clone()
                 }
             );
+
+            if !result.success
+                && let Err(e) = self.telegram.send_error(&result).await
+            {
+                eprintln!("Telegram notification failed: {}", e);
+            }
 
             if let Err(e) = self.store_result(result).await {
                 eprintln!("Store result: {}", e);
@@ -134,7 +146,8 @@ impl HealthChecker {
 #[cfg(test)]
 mod tests {
     use super::HealthChecker;
-    use crate::config::Target;
+    use crate::config::{Target, Telegram as TelegramConfig};
+    use crate::telegram::Telegram;
     use clickhouse::Client;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
@@ -181,27 +194,39 @@ mod tests {
         }
     }
 
+    fn make_telegram_config() -> TelegramConfig {
+        TelegramConfig {
+            chat_id: 42,
+            bot_token: "test-token".to_string(),
+        }
+    }
+
+    fn make_checker() -> HealthChecker {
+        let telegram = Telegram::from_config(&make_telegram_config());
+        HealthChecker::new(Client::default(), telegram).expect("checker should initialize")
+    }
+
     #[tokio::test]
     async fn check_target_returns_success_for_2xx_response() {
         let url = spawn_http_server(200, "ok", 0).await;
-        let checker = HealthChecker::new(Client::default()).expect("checker should initialize");
+        let checker = make_checker();
 
         let result = checker.check_target(&make_target(url, 1000)).await;
 
         assert_eq!(result.status, 200);
-        assert_eq!(result.success, 1);
+        assert_eq!(result.success, true);
         assert!(result.error.is_empty());
     }
 
     #[tokio::test]
     async fn check_target_marks_non_2xx_as_unsuccessful() {
         let url = spawn_http_server(503, "unavailable", 0).await;
-        let checker = HealthChecker::new(Client::default()).expect("checker should initialize");
+        let checker = make_checker();
 
         let result = checker.check_target(&make_target(url, 1000)).await;
 
         assert_eq!(result.status, 503);
-        assert_eq!(result.success, 0);
+        assert_eq!(result.success, false);
         assert!(result.error.is_empty());
     }
 
@@ -209,18 +234,18 @@ mod tests {
     async fn check_target_returns_error_when_request_fails() {
         // Port 9 is typically closed locally, giving a deterministic connect error.
         let url = "http://127.0.0.1:9".to_string();
-        let checker = HealthChecker::new(Client::default()).expect("checker should initialize");
+        let checker = make_checker();
 
         let result = checker.check_target(&make_target(url, 100)).await;
 
         assert_eq!(result.status, 0);
-        assert_eq!(result.success, 0);
+        assert_eq!(result.success, false);
         assert!(!result.error.is_empty());
     }
 
     #[tokio::test]
     async fn run_check_loop_returns_immediately_for_zero_interval() {
-        let checker = HealthChecker::new(Client::default()).expect("checker should initialize");
+        let checker = make_checker();
         let target = Target {
             name: "invalid".to_string(),
             url: "https://example.com".to_string(),
