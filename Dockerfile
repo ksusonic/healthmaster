@@ -2,7 +2,7 @@ FROM rust:1-bookworm AS builder
 WORKDIR /app
 
 # Build dependency graph first to improve layer caching between source changes.
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml ./
 COPY src ./src
 RUN cargo build --release
 
