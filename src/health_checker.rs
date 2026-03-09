@@ -127,7 +127,7 @@ impl HealthChecker {
                 }
             );
 
-            if result.success
+            if !result.success
                 && let Err(e) = self.telegram.send_error(&result).await
             {
                 eprintln!("Telegram notification failed: {}", e);
