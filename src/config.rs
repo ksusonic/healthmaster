@@ -153,7 +153,7 @@ mod tests {
             Ok(_) => panic!("invalid toml should fail"),
             Err(e) => e,
         };
-        assert!(error.to_string().contains("Parse config file:"));
+        assert!(error.to_string().contains("Failed to parse config file at"));
         let _ = fs::remove_file(path);
     }
 
