@@ -40,45 +40,66 @@ impl HealthChecker {
         let timestamp = Utc::now();
 
         let timeout = Duration::from_millis(target.timeout_ms);
-        let request = self.client.get(&target.url).timeout(timeout);
 
-        match request.send().await {
-            Ok(response) => {
-                let status = response.status().as_u16();
-                let mut success = response.status().is_success();
-                let mut error = String::new();
+        // Retry logic: attempt the request up to target.retry times
+        // with a short 50ms delay between attempts to avoid long waits
+        let mut last_error = None;
+        let mut attempts = 0;
 
-                // Drain the body so hyper can return this connection to the pool.
-                if let Err(e) = response.bytes().await {
-                    success = false;
-                    error = format!("read response body: {e}");
+        for attempt in 0..target.retry {
+            attempts = attempt + 1;
+            let request = self.client.get(&target.url).timeout(timeout);
+
+            match request.send().await {
+                Ok(response) => {
+                    let status = response.status().as_u16();
+                    let mut success = response.status().is_success();
+                    let mut error = String::new();
+
+                    // Drain the body so hyper can return this connection to the pool.
+                    if let Err(e) = response.bytes().await {
+                        success = false;
+                        error = format!("read response body: {e}");
+                    }
+
+                    let latency_ms = start.elapsed().as_millis() as u32;
+
+                    return HealthCheckResult {
+                        timestamp,
+                        target: target.name.clone(),
+                        url: target.url.clone(),
+                        status,
+                        latency_ms,
+                        success,
+                        error,
+                    };
                 }
+                Err(e) => {
+                    last_error = Some(e);
 
-                let latency_ms = start.elapsed().as_millis() as u32;
-
-                HealthCheckResult {
-                    timestamp,
-                    target: target.name.clone(),
-                    url: target.url.clone(),
-                    status,
-                    latency_ms,
-                    success,
-                    error,
+                    // If this isn't the last attempt, wait briefly before retrying
+                    if attempt + 1 < target.retry {
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                    }
                 }
             }
-            Err(e) => {
-                let latency_ms = start.elapsed().as_millis() as u32;
+        }
 
-                HealthCheckResult {
-                    timestamp,
-                    target: target.name.clone(),
-                    url: target.url.clone(),
-                    status: 0,
-                    latency_ms,
-                    success: false,
-                    error: e.to_string(),
-                }
-            }
+        // All retries exhausted
+        let latency_ms = start.elapsed().as_millis() as u32;
+        let error_msg = match last_error {
+            Some(e) => format!("{} (after {} attempts)", e, attempts),
+            None => format!("Unknown error (after {} attempts)", attempts),
+        };
+
+        HealthCheckResult {
+            timestamp,
+            target: target.name.clone(),
+            url: target.url.clone(),
+            status: 0,
+            latency_ms,
+            success: false,
+            error: error_msg,
         }
     }
 
@@ -191,6 +212,7 @@ mod tests {
             url,
             timeout_ms,
             interval_seconds: 60,
+            retry: 3,
         }
     }
 
@@ -251,9 +273,39 @@ mod tests {
             url: "https://example.com".to_string(),
             timeout_ms: 1000,
             interval_seconds: 0,
+            retry: 3,
         };
 
         let result = timeout(Duration::from_millis(50), checker.run_check_loop(target)).await;
         assert!(result.is_ok(), "zero interval should not block or panic");
+    }
+
+    #[tokio::test]
+    async fn check_target_retries_on_failure_but_completes_quickly() {
+        // Port 9 is typically closed, so this will fail quickly
+        let url = "http://127.0.0.1:9".to_string();
+        let checker = make_checker();
+        let target = Target {
+            name: "example".to_string(),
+            url,
+            timeout_ms: 100, // Short timeout
+            interval_seconds: 60,
+            retry: 3, // 3 retries
+        };
+
+        let start = std::time::Instant::now();
+        let result = checker.check_target(&target).await;
+        let elapsed = start.elapsed();
+
+        // Should fail after retries
+        assert_eq!(result.success, false);
+        assert!(result.error.contains("after 3 attempts"));
+
+        // Should complete in less than 500ms (100ms timeout * 3 attempts + 50ms * 2 delays = ~400ms max)
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "Retries took too long: {:?}",
+            elapsed
+        );
     }
 }

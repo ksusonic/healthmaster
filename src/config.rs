@@ -45,6 +45,12 @@ pub struct Target {
     pub url: String,
     pub timeout_ms: u64,
     pub interval_seconds: u32,
+    #[serde(default = "default_retry")]
+    pub retry: usize,
+}
+
+fn default_retry() -> usize {
+    3
 }
 
 impl Config {
@@ -92,6 +98,15 @@ fn validate_targets(targets: &[Target]) -> Result<(), std::io::Error> {
                 std::io::ErrorKind::InvalidData,
                 format!(
                     "Invalid target config at index {idx} ('{}'): interval_seconds must be greater than 0",
+                    target.name
+                ),
+            ));
+        }
+        if target.retry == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Invalid target config at index {idx} ('{}'): retry must be at least 1",
                     target.name
                 ),
             ));
@@ -188,7 +203,7 @@ mod tests {
         set_required_env_vars();
 
         let path = write_temp_file(
-            "[[targets]]\nname = \"example\"\nurl = \"https://example.com\"\ntimeout_ms = 1000\ninterval_seconds = 0\n",
+            "[[targets]]\nname = \"example\"\nurl = \"https://example.com\"\ntimeout_ms = 1000\ninterval_seconds = 0\nretry = 3\n",
         );
 
         let error = match Config::from_path_and_env(&path) {

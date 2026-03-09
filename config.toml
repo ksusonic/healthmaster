@@ -4,9 +4,11 @@ name = "google"
 url = "https://google.com"
 timeout_ms = 3000
 interval_seconds = 30
+retry = 3
 
 [[targets]]
 name = "github"
 url = "https://github.com"
 timeout_ms = 5000
 interval_seconds = 60
+retry = 3
