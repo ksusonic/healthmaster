@@ -35,8 +35,18 @@ pub struct Target {
 
 impl Config {
     pub fn from_path_and_env(path: impl AsRef<Path>) -> Result<Self, Box<dyn Error>> {
-        let content = &fs::read_to_string(path)?;
-        let mut config: Config = toml::from_str(content)?;
+        let content = &fs::read_to_string(&path).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Config file not found at path: {}", path.as_ref().display()),
+            )
+        })?;
+        let mut config: Config = toml::from_str(content).map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to parse config file: {e}"),
+            )
+        })?;
 
         config.telegram.bot_token = std::env::var("TELEGRAM_BOT_TOKEN").map_err(|_| {
             std::io::Error::new(
