@@ -18,27 +18,46 @@ pub async fn run(path: impl AsRef<Path>) -> Result<(), Box<dyn Error>> {
     let clickhouse_client = crate::clickhouse::connect(config.clickhouse).await?;
     println!("ClickHouse connected");
 
-    let health_checker = HealthChecker::new(clickhouse_client);
+    let health_checker = HealthChecker::new(clickhouse_client)
+        .map_err(|e| format!("Initialize HTTP client: {e}"))?;
     let health_checker = std::sync::Arc::new(health_checker);
 
     println!("Starting health checks...");
 
-    let mut handles = vec![];
+    let mut join_set = tokio::task::JoinSet::new();
 
     for target in config.targets {
+        println!("Spawning thread for: {:?}", target.name);
+
         let checker = health_checker.clone();
-        let handle = tokio::spawn(async move {
+        let target_name = target.name.clone();
+        join_set.spawn(async move {
             checker.run_check_loop(target).await;
+            target_name
         });
-        handles.push(handle);
     }
 
-    // Wait for all tasks (they run forever)
-    for handle in handles {
-        let _ = handle.await;
+    // Wait for the first task termination; any finished task is treated as unexpected.
+    match join_set.join_next().await {
+        Some(result) => match result {
+            Ok(target_name) => {
+                eprintln!(
+                    "Health check task for '{}' exited unexpectedly",
+                    target_name
+                );
+                Err(format!("Health check task for '{}' stopped running", target_name).into())
+            }
+            Err(e) if e.is_panic() => {
+                eprintln!("Health check task panicked: {:?}", e);
+                Err(format!("Health check task panicked: {:?}", e).into())
+            }
+            Err(e) => {
+                eprintln!("Health check task failed: {:?}", e);
+                Err(format!("Health check task failed: {:?}", e).into())
+            }
+        },
+        None => Ok(()),
     }
-
-    Ok(())
 }
 
 pub async fn run_default() -> Result<(), Box<dyn Error>> {

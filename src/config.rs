@@ -39,17 +39,12 @@ pub struct Clickhouse {
     pub password: String,
 }
 
-fn default_interval_seconds() -> u64 {
-    60
-}
-
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize)]
 pub struct Target {
     pub name: String,
     pub url: String,
     pub timeout_ms: u64,
-    #[serde(default = "default_interval_seconds")]
-    pub interval_seconds: u64,
+    pub interval_seconds: u32,
 }
 
 impl Config {
@@ -64,7 +59,7 @@ impl Config {
         let file_config: FileConfig = toml::from_str(content).map_err(|e| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("Failed to parse config file: {e}"),
+                format!("Parse config file: {e}"),
             )
         })?;
 
