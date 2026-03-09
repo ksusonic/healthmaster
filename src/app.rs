@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::health_checker::HealthChecker;
 use std::error::Error;
 use std::path::Path;
 
@@ -12,10 +13,30 @@ pub async fn run(path: impl AsRef<Path>) -> Result<(), Box<dyn Error>> {
     dotenv::dotenv().ok();
 
     let config = load_config(path)?;
-    println!("Config loaded");
+    println!("Config loaded with {} targets", config.targets.len());
 
-    let _clickhouse_client = crate::clickhouse::connect(config.clickhouse).await?;
+    let clickhouse_client = crate::clickhouse::connect(config.clickhouse).await?;
     println!("ClickHouse connected");
+
+    let health_checker = HealthChecker::new(clickhouse_client);
+    let health_checker = std::sync::Arc::new(health_checker);
+
+    println!("Starting health checks...");
+
+    let mut handles = vec![];
+
+    for target in config.targets {
+        let checker = health_checker.clone();
+        let handle = tokio::spawn(async move {
+            checker.run_check_loop(target).await;
+        });
+        handles.push(handle);
+    }
+
+    // Wait for all tasks (they run forever)
+    for handle in handles {
+        let _ = handle.await;
+    }
 
     Ok(())
 }

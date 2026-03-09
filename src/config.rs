@@ -39,11 +39,17 @@ pub struct Clickhouse {
     pub password: String,
 }
 
-#[derive(Deserialize)]
+fn default_interval_seconds() -> u64 {
+    60
+}
+
+#[derive(Deserialize, Clone)]
 pub struct Target {
     pub name: String,
     pub url: String,
     pub timeout_ms: u64,
+    #[serde(default = "default_interval_seconds")]
+    pub interval_seconds: u64,
 }
 
 impl Config {
