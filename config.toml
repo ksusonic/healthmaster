@@ -1,0 +1,14 @@
+interval_seconds = 30
+
+[telegram]
+chat_id = 123456789
+
+[[targets]]
+name = "google"
+url = "https://google.com"
+timeout_ms = 3000
+
+[[targets]]
+name = "github"
+url = "https://github.com"
+timeout_ms = 5000
