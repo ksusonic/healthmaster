@@ -39,7 +39,7 @@ interval_seconds = 60  # Check every 60 seconds
 - `name`: Target identifier
 - `url`: URL to check
 - `timeout_ms`: Request timeout in milliseconds
-- `interval_seconds`: How often to check (default: 60 seconds)
+- `interval_seconds`: How often to check, in seconds
 
 ## Environment Variables
 

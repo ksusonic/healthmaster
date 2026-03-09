@@ -27,7 +27,7 @@ pub async fn run(path: impl AsRef<Path>) -> Result<(), Box<dyn Error>> {
     let mut join_set = tokio::task::JoinSet::new();
 
     for target in config.targets {
-        println!("Spawning thread for: {:?}", target.name);
+        println!("Spawning task: {:?}", target.name);
 
         let checker = health_checker.clone();
         let target_name = target.name.clone();

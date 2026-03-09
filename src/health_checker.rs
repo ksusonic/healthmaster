@@ -90,6 +90,14 @@ impl HealthChecker {
     }
 
     pub async fn run_check_loop(&self, target: Target) {
+        if target.interval_seconds == 0 {
+            eprintln!(
+                "Target '{}' has interval_seconds=0; skipping to avoid panic",
+                target.name
+            );
+            return;
+        }
+
         let duration = Duration::from_secs(target.interval_seconds.into());
         let mut interval = tokio::time::interval(duration);
 
@@ -130,7 +138,7 @@ mod tests {
     use clickhouse::Client;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
-    use tokio::time::{Duration, sleep};
+    use tokio::time::{Duration, sleep, timeout};
 
     async fn spawn_http_server(status_code: u16, body: &'static str, delay_ms: u64) -> String {
         let listener = TcpListener::bind("127.0.0.1:0")
@@ -208,5 +216,19 @@ mod tests {
         assert_eq!(result.status, 0);
         assert_eq!(result.success, 0);
         assert!(!result.error.is_empty());
+    }
+
+    #[tokio::test]
+    async fn run_check_loop_returns_immediately_for_zero_interval() {
+        let checker = HealthChecker::new(Client::default()).expect("checker should initialize");
+        let target = Target {
+            name: "invalid".to_string(),
+            url: "https://example.com".to_string(),
+            timeout_ms: 1000,
+            interval_seconds: 0,
+        };
+
+        let result = timeout(Duration::from_millis(50), checker.run_check_loop(target)).await;
+        assert!(result.is_ok(), "zero interval should not block or panic");
     }
 }

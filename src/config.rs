@@ -59,9 +59,14 @@ impl Config {
         let file_config: FileConfig = toml::from_str(content).map_err(|e| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("Parse config file: {e}"),
+                format!(
+                    "Failed to parse config file at {}: {e}",
+                    path.as_ref().display()
+                ),
             )
         })?;
+
+        validate_targets(&file_config.targets)?;
 
         let env = EnvConfig::init_from_env()?;
 
@@ -78,6 +83,22 @@ impl Config {
             targets: file_config.targets,
         })
     }
+}
+
+fn validate_targets(targets: &[Target]) -> Result<(), std::io::Error> {
+    for (idx, target) in targets.iter().enumerate() {
+        if target.interval_seconds == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Invalid target config at index {idx} ('{}'): interval_seconds must be greater than 0",
+                    target.name
+                ),
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -103,6 +124,16 @@ mod tests {
 
         fs::write(&path, content).expect("temporary config should be writable");
         path
+    }
+
+    fn set_required_env_vars() {
+        unsafe {
+            std::env::set_var("TELEGRAM_CHAT_ID", "42");
+            std::env::set_var("TELEGRAM_BOT_TOKEN", "token");
+            std::env::set_var("CLICKHOUSE_URL", "http://localhost:8123");
+            std::env::set_var("CLICKHOUSE_USER", "default");
+            std::env::set_var("CLICKHOUSE_PASSWORD", "default");
+        }
     }
 
     #[test]
@@ -147,6 +178,28 @@ mod tests {
             Err(e) => e,
         };
         assert!(error.to_string().contains("TELEGRAM_CHAT_ID"));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn from_path_and_env_fails_when_target_interval_is_zero() {
+        let _guard = env_lock().lock().expect("env lock should not be poisoned");
+        set_required_env_vars();
+
+        let path = write_temp_file(
+            "[[targets]]\nname = \"example\"\nurl = \"https://example.com\"\ntimeout_ms = 1000\ninterval_seconds = 0\n",
+        );
+
+        let error = match Config::from_path_and_env(&path) {
+            Ok(_) => panic!("zero interval should fail"),
+            Err(e) => e,
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("interval_seconds must be greater than 0")
+        );
 
         let _ = fs::remove_file(path);
     }
