@@ -2,7 +2,7 @@ use crate::config::Telegram as TelegramConfig;
 use crate::health_checker::HealthCheckResult;
 use teloxide::Bot;
 use teloxide::prelude::Requester;
-use teloxide::types::ChatId;
+use teloxide::types::{ChatId, ParseMode};
 
 pub struct Telegram {
     bot: Bot,
@@ -24,19 +24,39 @@ impl Telegram {
             result.error.clone()
         };
 
+        // Escape special characters for MarkdownV2
+        let target_escaped = Self::escape_markdown_v2(&result.target);
+        let url_escaped = Self::escape_markdown_v2(&result.url);
+        let reason_escaped = Self::escape_markdown_v2(&reason);
+
         format!(
-            "Health check failed\nTarget: {}\nURL: {}\nLatency: {}ms\nReason: {}",
-            result.target, result.url, result.latency_ms, reason
+            "🔴 *Health Check Failed: {}*\n\n*URL:* {}\n*Latency:* {}ms\n*Reason:* {}",
+            target_escaped, url_escaped, result.latency_ms, reason_escaped
         )
+    }
+
+    fn escape_markdown_v2(text: &str) -> String {
+        // MarkdownV2 requires escaping: _*[]()~`>#+-=|{}.!
+        text.chars()
+            .map(|c| match c {
+                '_' | '*' | '[' | ']' | '(' | ')' | '~' | '`' | '>' | '#' | '+' | '-' | '='
+                | '|' | '{' | '}' | '.' | '!' => {
+                    format!("\\{}", c)
+                }
+                _ => c.to_string(),
+            })
+            .collect()
     }
 
     pub async fn send_error(
         &self,
         result: &HealthCheckResult,
     ) -> Result<(), teloxide::RequestError> {
-        self.bot
-            .send_message(self.chat_id, Self::build_error_message(result))
-            .await?;
+        let mut request = self
+            .bot
+            .send_message(self.chat_id, Self::build_error_message(result));
+        request.parse_mode = Some(ParseMode::MarkdownV2);
+        request.await?;
         Ok(())
     }
 }
