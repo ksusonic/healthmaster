@@ -122,3 +122,91 @@ impl HealthChecker {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::HealthChecker;
+    use crate::config::Target;
+    use clickhouse::Client;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+    use tokio::time::{Duration, sleep};
+
+    async fn spawn_http_server(status_code: u16, body: &'static str, delay_ms: u64) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test listener should bind");
+        let addr = listener
+            .local_addr()
+            .expect("listener should have local address");
+
+        tokio::spawn(async move {
+            let (mut stream, _) = listener
+                .accept()
+                .await
+                .expect("server should accept one connection");
+            let mut request_buf = [0_u8; 1024];
+            let _ = stream.read(&mut request_buf).await;
+
+            if delay_ms > 0 {
+                sleep(Duration::from_millis(delay_ms)).await;
+            }
+
+            let response = format!(
+                "HTTP/1.1 {} TEST\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                status_code,
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(response.as_bytes()).await;
+        });
+
+        format!("http://{}", addr)
+    }
+
+    fn make_target(url: String, timeout_ms: u64) -> Target {
+        Target {
+            name: "example".to_string(),
+            url,
+            timeout_ms,
+            interval_seconds: 60,
+        }
+    }
+
+    #[tokio::test]
+    async fn check_target_returns_success_for_2xx_response() {
+        let url = spawn_http_server(200, "ok", 0).await;
+        let checker = HealthChecker::new(Client::default()).expect("checker should initialize");
+
+        let result = checker.check_target(&make_target(url, 1000)).await;
+
+        assert_eq!(result.status, 200);
+        assert_eq!(result.success, 1);
+        assert!(result.error.is_empty());
+    }
+
+    #[tokio::test]
+    async fn check_target_marks_non_2xx_as_unsuccessful() {
+        let url = spawn_http_server(503, "unavailable", 0).await;
+        let checker = HealthChecker::new(Client::default()).expect("checker should initialize");
+
+        let result = checker.check_target(&make_target(url, 1000)).await;
+
+        assert_eq!(result.status, 503);
+        assert_eq!(result.success, 0);
+        assert!(result.error.is_empty());
+    }
+
+    #[tokio::test]
+    async fn check_target_returns_error_when_request_fails() {
+        // Port 9 is typically closed locally, giving a deterministic connect error.
+        let url = "http://127.0.0.1:9".to_string();
+        let checker = HealthChecker::new(Client::default()).expect("checker should initialize");
+
+        let result = checker.check_target(&make_target(url, 100)).await;
+
+        assert_eq!(result.status, 0);
+        assert_eq!(result.success, 0);
+        assert!(!result.error.is_empty());
+    }
+}
