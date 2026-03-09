@@ -1,12 +1,10 @@
 use clap::Parser;
 use healthmaster::app;
 
-/// Health monitoring service
-#[derive(Parser, Debug)]
+#[derive(Parser)]
 #[command(name = "healthmaster")]
 #[command(about = "A health monitoring service", long_about = None)]
 struct Args {
-    /// Path to the configuration file
     #[arg(short, long, default_value = app::DEFAULT_CONFIG_PATH)]
     config: String,
 }
