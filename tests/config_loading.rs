@@ -16,6 +16,7 @@ fn write_temp_config() -> PathBuf {
 name = "example"
 url = "https://example.com"
 timeout_ms = 1500
+interval_seconds = 60
 "#;
 
     fs::write(&path, content).expect("temporary config should be writable");

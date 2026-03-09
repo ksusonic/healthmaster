@@ -5,9 +5,11 @@ edition = "2024"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-clickhouse = "0.14.2"
+clickhouse = { version = "0.14.2", features = ["chrono"] }
 dotenv = "0.15.0"
 envconfig = "0.11.0"
 serde = { version = "1", features = ["derive"] }
 toml = "1.0.6"
 tokio = { version = "1", features = ["full"] }
+reqwest = "0.13.2"
+chrono = "0.4"
