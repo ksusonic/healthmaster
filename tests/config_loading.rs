@@ -12,11 +12,6 @@ fn write_temp_config() -> PathBuf {
     path.push(format!("healthmaster-config-{now}.toml"));
 
     let content = r#"
-interval_seconds = 15
-
-[telegram]
-chat_id = 42
-
 [[targets]]
 name = "example"
 url = "https://example.com"
@@ -32,15 +27,19 @@ fn load_config_from_file() {
     const TEST_TOKEN: &str = "test_token_123";
 
     unsafe {
+        std::env::set_var("TELEGRAM_CHAT_ID", "42");
         std::env::set_var("TELEGRAM_BOT_TOKEN", TEST_TOKEN);
+        std::env::set_var("CLICKHOUSE_URL", "http://localhost:8123");
+        std::env::set_var("CLICKHOUSE_USER", "default");
+        std::env::set_var("CLICKHOUSE_PASSWORD", "default");
     }
 
     let path = write_temp_config();
     let config = app::load_config(&path).expect("config should load");
 
-    assert_eq!(config.interval_seconds, 15);
     assert_eq!(config.telegram.chat_id, 42);
     assert_eq!(config.telegram.bot_token, TEST_TOKEN);
+    assert_eq!(config.clickhouse.url, "http://localhost:8123");
     assert_eq!(config.targets.len(), 1);
     assert_eq!(config.targets[0].name, "example");
 

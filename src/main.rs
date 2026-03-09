@@ -9,10 +9,11 @@ struct Args {
     config: String,
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
-    let err = app::run(&args.config);
+    let err = app::run(&args.config).await;
     if let Err(e) = err {
         eprintln!("Error: {e}");
         std::process::exit(1);
