@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::health_checker::HealthChecker;
+use crate::telegram::Telegram;
 use std::error::Error;
 use std::path::Path;
 
@@ -18,7 +19,8 @@ pub async fn run(path: impl AsRef<Path>) -> Result<(), Box<dyn Error>> {
     let clickhouse_client = crate::clickhouse::connect(config.clickhouse).await?;
     println!("ClickHouse connected");
 
-    let health_checker = HealthChecker::new(clickhouse_client)
+    let telegram = Telegram::from_config(&config.telegram);
+    let health_checker = HealthChecker::new(clickhouse_client, telegram)
         .map_err(|e| format!("Initialize HTTP client: {e}"))?;
     let health_checker = std::sync::Arc::new(health_checker);
 
